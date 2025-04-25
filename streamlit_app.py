@@ -18,7 +18,7 @@ st.set_page_config(
 def load_data():
     # Assumes data/metrics_data.csv and data/release_data.csv exist
     metrics = pd.read_csv("data/metrics_data.csv", parse_dates=["date_"])
-    releases = pd.read_csv("data/release_data_new.csv", parse_dates=["updated"])
+    releases = pd.read_csv("data/release_data.csv", parse_dates=["updated","created"])
     return metrics, releases
 
 metrics_df, releases_df = load_data()
@@ -31,9 +31,9 @@ metrics_df = metrics_df.assign(
     msat        = metrics_df["happy"] / metrics_df["feedback_given"]   * 100
 )
 
-# ----------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # 4. USER CONTROLS
-# ----------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 st.sidebar.header("Controls")
 
 gran = st.sidebar.selectbox(
@@ -108,11 +108,11 @@ else:  # Monthly
     )
     df_agg["time"] = df_agg["period_start"].dt.strftime("%b %y")
 
-# sort chronologically by period_start
+# sort chronologically
 df_agg = df_agg.sort_values("period_start")
-sort_list = df_agg["time"].tolist()
+axis_order = df_agg["time"].tolist()
 
-# add labels for each point
+# label values
 if not df_agg.empty:
     df_agg["value_label"] = df_agg["value"].round(2).astype(str) + "%"
 
@@ -120,56 +120,49 @@ if not df_agg.empty:
 # 6. CHARTING
 # -----------------------------------------------------------------------------
 st.title("Metrics vs. Releases")
-
 line = alt.Chart(df_agg).mark_line(point=True, color="steelblue").encode(
-    x=alt.X("time:O", title="Time", sort=sort_list,
-            axis=alt.Axis(labelAngle=0, labelAlign="center")),
+    x=alt.X("time:O", sort=axis_order, axis=alt.Axis(labelAngle=0, labelAlign="center")),
     y=alt.Y("value:Q", title=metric_label)
 )
 text = alt.Chart(df_agg).mark_text(dy=15, color="white").encode(
-    x=alt.X("time:O", sort=sort_list),
+    x=alt.X("time:O", sort=axis_order),
     y="value:Q",
     text=alt.Text("value_label:N")
 )
 
-# -----------------------------------------------------------------------------
 # Release aggregation
-# -----------------------------------------------------------------------------
 rel_filtered = releases_df[
     (releases_df["updated"] >= pd.to_datetime(start_date)) &
     (releases_df["updated"] <= pd.to_datetime(end_date))
 ].copy()
 if gran == "Daily":
     rel_filtered["period_start"] = rel_filtered["updated"].dt.normalize()
-    grouping = ["period_start"]
+    grp = ["period_start"]
 elif gran == "Weekly":
     rel_filtered["period_start"] = rel_filtered["updated"].dt.to_period("W-SAT").apply(lambda p: p.start_time)
     rel_filtered["period_end"]   = rel_filtered["updated"].dt.to_period("W-SAT").apply(lambda p: p.end_time)
-    grouping = ["period_start","period_end"]
+    grp = ["period_start","period_end"]
 else:
     rel_filtered["period_start"] = rel_filtered["updated"].dt.to_period("M").apply(lambda p: p.start_time)
-    grouping = ["period_start"]
-rel_agg = rel_filtered.groupby(grouping).agg(
+    grp = ["period_start"]
+rel_count = rel_filtered.groupby(grp).agg(
     releases_count=("issue_key","count"),
     releases_keys=("issue_key", lambda x: ", ".join(x))
 ).reset_index()
 if gran == "Daily":
-    rel_agg["time"] = rel_agg["period_start"].dt.strftime("%a, %d %b")
+    rel_count["time"] = rel_count["period_start"].dt.strftime("%a, %d %b")
 elif gran == "Weekly":
-    rel_agg["time"] = (
-        rel_agg["period_start"].dt.strftime("%b %d") + " - " +
-        rel_agg["period_end"].dt.strftime("%b %d")
+    rel_count["time"] = (
+        rel_count["period_start"].dt.strftime("%b %d") + " - " +
+        rel_count["period_end"].dt.strftime("%b %d")
     )
 else:
-    rel_agg["time"] = rel_agg["period_start"].dt.strftime("%b %y")
-rel_agg = rel_agg.sort_values("period_start")
-rules = alt.Chart(rel_agg).mark_rule(color="#00FFFF").encode(x=alt.X("time:O", sort=sort_list))
-points = alt.Chart(rel_agg).mark_point(color="#00FFFF", size=100).encode(
-    x=alt.X("time:O", sort=sort_list),
-    tooltip=[
-        alt.Tooltip("releases_count:Q", title="Release Count"),
-        alt.Tooltip("releases_keys:N",   title="Issue Keys")
-    ]
+    rel_count["time"] = rel_count["period_start"].dt.strftime("%b %y")
+rel_count = rel_count.sort_values("period_start")
+rules = alt.Chart(rel_count).mark_rule(color="#00FFFF").encode(x=alt.X("time:O", sort=axis_order))
+points = alt.Chart(rel_count).mark_point(color="#00FFFF", size=100).encode(
+    x=alt.X("time:O", sort=axis_order),
+    tooltip=[alt.Tooltip("releases_count:Q", title="Release Count"), alt.Tooltip("releases_keys:N", title="Issue Keys")]
 )
 chart = alt.layer(line + rules + points, text).properties(width=800, height=400).interactive()
 if df_agg.empty:
@@ -182,6 +175,7 @@ else:
 # -----------------------------------------------------------------------------
 with st.expander("Show raw aggregated data"):
     df_metrics = df.copy()
+    # group and aggregate metrics
     if gran == "Daily":
         df_metrics["period_start"] = df_metrics["date_"].dt.normalize()
         group_cols = ["period_start"]
@@ -196,35 +190,36 @@ with st.expander("Show raw aggregated data"):
         active_sessions=("active_sessions","sum"),
         fd_tickets=("fd_tickets","sum"),
         feedback_given=("feedback_given","sum"),
-        msat=("msat","mean"),
-        ticket_rate=("ticket_rate","mean")
+        happy=("happy","sum")
     ).reset_index()
+    # recompute percentages
+    agg["MSAT %"] = (agg["happy"] / agg["feedback_given"] * 100).round(2).astype(str) + "%"
+    agg["Ticket creation %"] = (agg["fd_tickets"] / agg["active_sessions"] * 100).round(2).astype(str) + "%"
+    # merge labels
     agg = agg.merge(df_agg[["period_start","time"]], on="period_start", how="left")
-    display_df = agg[["time","active_sessions","fd_tickets","feedback_given","msat","ticket_rate"]]
-    # custom number formatting for large values
-    def fmt(v):
-        if v >= 1_000_000:
-            return f"{v/1_000_000:.1f}M"
-        elif v >= 1_000:
-            return f"{v/1_000:.1f}K"
-        else:
-            return str(int(v))
-    display_df["active_sessions"] = display_df["active_sessions"].apply(fmt)
-    display_df["fd_tickets"]     = display_df["fd_tickets"].apply(fmt)
-    display_df["feedback_given"]  = display_df["feedback_given"].apply(fmt)
-    # percentages
-    display_df["msat"]          = display_df["msat"].round(2).astype(str) + "%"
-    display_df["ticket_rate"]   = display_df["ticket_rate"].round(2).astype(str) + "%"
-    # rename columns to exact order
-    display_df = display_df.rename(columns={
-        "time":"Time Period",
-        "active_sessions":"Active sessions",
-        "fd_tickets":"FD Tickets",
-        "feedback_given":"Feedback given",
-        "msat":"MSAT %",
-        "ticket_rate":"Ticket creation %"
-    })
+    # format large numbers
+    def fmt(v): return f"{v/1_000_000:.1f}M" if v >= 1e6 else (f"{v/1_000:.1f}K" if v >= 1e3 else str(int(v)))
+    # build display table
+    display_df = agg[["time","active_sessions","fd_tickets","feedback_given","MSAT %","Ticket creation %"]].copy()
+    display_df["Active sessions"] = display_df["active_sessions"].apply(fmt)
+    display_df["FD Tickets"]     = display_df["fd_tickets"].apply(fmt)
+    display_df["Feedback given"]  = display_df["feedback_given"].apply(fmt)
+    display_df = display_df.drop(columns=["active_sessions","fd_tickets","feedback_given"])
+    display_df = display_df.rename(columns={"time":"Time Period"})
     st.dataframe(display_df)
 
 with st.expander("Show release data"):
-    st.dataframe(rel_filtered.sort_values("updated", ascending=False))
+    # select and rename fields
+    rel_display = rel_filtered.copy()
+    rel_display = rel_display.loc[:, ["period_start","issue_key","summary","jira_link","issue_type","created"]]
+    rel_display = rel_display.rename(columns={
+        "period_start":"Release Date",
+        "issue_key":"JIRA ID",
+        "summary":"Summary",
+        "jira_link":"JIRA Link",
+        "issue_type":"Issue Type",
+        "created":"Created On"
+    })
+    # sort by Release Date descending
+    rel_display = rel_display.sort_values("Release Date", ascending=False)
+    st.dataframe(rel_display)
