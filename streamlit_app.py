@@ -85,14 +85,12 @@ df = metrics_df[
 ].copy()
 
 if gran == "Daily":
-    # group by actual date
     df_agg = df.groupby("date_", as_index=False).agg(
         value=(metric_column, "mean")
     ).rename(columns={"date_":"period_start"})
     df_agg["time"] = df_agg["period_start"].dt.strftime("%a, %d %b")
 
 elif gran == "Weekly":
-    # week from Sunday to Saturday
     df["week_start"] = df["date_"].dt.to_period("W-SAT").apply(lambda p: p.start_time)
     df["week_end"]   = df["date_"].dt.to_period("W-SAT").apply(lambda p: p.end_time)
     df_agg = df.groupby(["week_start","week_end"], as_index=False).agg(
@@ -125,19 +123,20 @@ if not df_agg.empty:
 # -----------------------------------------------------------------------------
 st.title("Metrics vs. Releases")
 
-# line + data labels
+# Line
 line = alt.Chart(df_agg).mark_line(point=True, color="steelblue").encode(
     x=alt.X("time:O", title="Time", sort=sort_list,
             axis=alt.Axis(labelAngle=0, labelAlign="center")),
     y=alt.Y("value:Q", title=metric_label)
 )
-text = alt.Chart(df_agg).mark_text(dy=-10).encode(
+# Data labels under points
+text = alt.Chart(df_agg).mark_text(dy=15, color="white").encode(
     x=alt.X("time:O", sort=sort_list),
-    y="value:Q",
+    y=alt.Y("value:Q"),
     text=alt.Text("value_label:N")
 )
 
-# release annotations
+# Release annotations
 rel = releases_df.copy()
 rel = rel[
     (rel["updated"] >= pd.to_datetime(start_date)) &
@@ -169,9 +168,9 @@ points = alt.Chart(rel).mark_point(color="#00FFFF", size=100).encode(
     ]
 )
 
-chart = (line + text + rules + points).properties(
-    width=800, height=400
-).interactive()
+# Layer: line, release, points, then text on top
+temp_chart = line + rules + points
+chart = alt.layer(temp_chart, text).properties(width=800, height=400).interactive()
 
 if df_agg.empty:
     st.warning("No metric data available for the selected period.")
