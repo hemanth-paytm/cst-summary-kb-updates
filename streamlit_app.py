@@ -18,7 +18,7 @@ st.set_page_config(
 def load_data():
     # Assumes data/metrics_data.csv and data/release_data.csv exist
     metrics = pd.read_csv("data/metrics_data.csv", parse_dates=["date_"])
-    releases = pd.read_csv("data/release_data_new.csv", parse_dates=["updated","created"])
+    releases = pd.read_csv("data/release_data.csv", parse_dates=["updated", "created"])
     return metrics, releases
 
 metrics_df, releases_df = load_data()
@@ -130,7 +130,9 @@ text = alt.Chart(df_agg).mark_text(dy=15, color="white").encode(
     text=alt.Text("value_label:N")
 )
 
+# -----------------------------------------------------------------------------
 # Release aggregation
+# -----------------------------------------------------------------------------
 rel_filtered = releases_df[
     (releases_df["updated"] >= pd.to_datetime(start_date)) &
     (releases_df["updated"] <= pd.to_datetime(end_date))
@@ -209,17 +211,26 @@ with st.expander("Show raw aggregated data"):
     st.dataframe(display_df)
 
 with st.expander("Show release data"):
-    # select and rename fields
     rel_display = rel_filtered.copy()
+    # select only the requested columns and convert Release Date to date
     rel_display = rel_display.loc[:, ["period_start","issue_key","summary","jira_link","issue_type","created"]]
+    rel_display["Release Date"] = rel_display["period_start"].dt.date
     rel_display = rel_display.rename(columns={
-        "period_start":"Release Date",
         "issue_key":"JIRA ID",
         "summary":"Summary",
         "jira_link":"JIRA Link",
         "issue_type":"Issue Type",
         "created":"Created On"
     })
-    # sort by Release Date descending
+    # convert JIRA Link to HTML hyperlink
+    rel_display["JIRA Link"] = rel_display["JIRA Link"].apply(
+        lambda url: f"<a href='{url}' target='_blank'>{url}</a>"
+    )
+    # reorder and drop helper
+    rel_display = rel_display[["Release Date","JIRA ID","Summary","JIRA Link","Issue Type","Created On"]]
     rel_display = rel_display.sort_values("Release Date", ascending=False)
-    st.dataframe(rel_display)
+    # render as HTML table to support links
+    st.markdown(
+        rel_display.to_html(index=False, escape=False),
+        unsafe_allow_html=True
+    )
