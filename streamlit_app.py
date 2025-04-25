@@ -17,7 +17,7 @@ st.set_page_config(
 @st.cache_data
 def load_data():
     # Assumes data/metrics_data.csv and data/release_data.csv exist
-    metrics = pd.read_csv("data/metrics_data.csv", parse_dates=["date_"])
+    metrics = pd.read_csv("data/metrics_data_new.csv", parse_dates=["date_"])
     releases = pd.read_csv("data/release_data_new.csv", parse_dates=["updated", "created"])
     return metrics, releases
 
