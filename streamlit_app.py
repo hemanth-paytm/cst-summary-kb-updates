@@ -28,7 +28,7 @@ metrics_df, releases_df = load_data()
 # -----------------------------------------------------------------------------
 metrics_df = metrics_df.assign(
     ticket_rate = metrics_df["fd_tickets"] / metrics_df["active_sessions"] * 100,
-    msat        = metrics_df["happy"] / metrics_df["feedback_given"] * 100
+    msat        = metrics_df["happy"] / metrics_df["feedback_given"]   * 100
 )
 
 # -----------------------------------------------------------------------------
@@ -62,7 +62,7 @@ metric_options = {
     "Ticket Creation Rate %": "ticket_rate",
     "MSAT":                    "msat"
 }
-metric_label = st.sidebar.selectbox(
+metric_label  = st.sidebar.selectbox(
     "Metric to plot",
     list(metric_options.keys())
 )
@@ -81,9 +81,7 @@ if gran == "Daily":
     df_agg = df.groupby("date_", as_index=False).agg(
         value=(metric_column, "mean")
     ).rename(columns={"date_":"time"})
-    df_agg["time_str"] = df_agg["time"].dt.strftime("%a, %d %b")
-    # Add sort key to ensure proper ordering
-    df_agg["sort_key"] = df_agg["time"]
+    df_agg["time"] = df_agg["time"].dt.strftime("%a, %d %b")
 
 elif gran == "Weekly":
     # Week from Sunday to Saturday
@@ -92,74 +90,37 @@ elif gran == "Weekly":
     df_agg = df.groupby(["week_start","week_end"], as_index=False).agg(
         value=(metric_column, "mean")
     )
-    df_agg["time_str"] = (
+    df_agg["time"] = (
         df_agg["week_start"].dt.strftime("%b %d") + " - " +
         df_agg["week_end"].dt.strftime("%b %d")
     )
-    # Add sort key to ensure proper ordering
-    df_agg["sort_key"] = df_agg["week_start"]
-    # Add time column for Altair
-    df_agg["time"] = df_agg["time_str"]
 
 else:  # Monthly
     df["month_start"] = df["date_"].dt.to_period("M").apply(lambda p: p.start_time)
     df_agg = df.groupby("month_start", as_index=False).agg(
         value=(metric_column, "mean")
     )
-    df_agg["time_str"] = df_agg["month_start"].dt.strftime("%b %y")
-    # Add sort key to ensure proper ordering
-    df_agg["sort_key"] = df_agg["month_start"]
-    # Add time column for Altair
-    df_agg["time"] = df_agg["time_str"]
+    df_agg["time"] = df_agg["month_start"].dt.strftime("%b %y")
 
-# Sort the data chronologically
-df_agg = df_agg.sort_values("sort_key")
-
-# Add labels for each point with exactly 2 decimal places
+# Add labels for each point
 if not df_agg.empty:
-    df_agg["value_label"] = df_agg["value"].apply(lambda x: f"{x:.2f}%")
+    df_agg["value_label"] = df_agg["value"].round(1).astype(str) + "%"
 
 # -----------------------------------------------------------------------------
 # 6. CHARTING
 # -----------------------------------------------------------------------------
 st.title("Metrics vs. Releases")
 
-# Function to create the chart - this helps fix the disappearing chart issue when expanders are used
-def create_chart(df_agg, rel):
-    if df_agg.empty:
-        return None
-        
-    # Line + data labels
-    line = alt.Chart(df_agg).mark_line(point=True, color="steelblue").encode(
-        x=alt.X("time:N", title="Time", sort=None, axis=alt.Axis(labelAngle=0, labelAlign="center")),
-        y=alt.Y("value:Q", title=metric_label)
-    )
-
-    # Always show data labels
-    text = alt.Chart(df_agg).mark_text(dy=-10).encode(
-        x="time:N",
-        y="value:Q",
-        text=alt.Text("value_label:N")
-    )
-
-    # Neon blue release markers
-    rules = alt.Chart(rel).mark_rule(color="#00FFFF").encode(
-        x="time:N"
-    )
-    points = alt.Chart(rel).mark_point(color="#00FFFF", size=100).encode(
-        x="time:N",
-        tooltip=[
-            alt.Tooltip("issue_id",    title="Release ID"),
-            alt.Tooltip("summary",     title="Release Name"),
-            alt.Tooltip("status",      title="Status"),
-            alt.Tooltip("issue_type",  title="Type"),
-            alt.Tooltip("updated",     title="Date")
-        ]
-    )
-
-    return (line + text + rules + points).properties(
-        width=800, height=400
-    ).interactive()
+# Line + data labels
+line = alt.Chart(df_agg).mark_line(point=True, color="steelblue").encode(
+    x=alt.X("time:O", title="Time", axis=alt.Axis(labelAngle=0, labelAlign="center")),
+    y=alt.Y("value:Q", title=metric_label)
+)
+text = alt.Chart(df_agg).mark_text(dy=-10).encode(
+    x="time:O",
+    y="value:Q",
+    text=alt.Text("value_label:N")
+)
 
 # Prepare release annotations without mutating original
 rel = releases_df.copy()
@@ -180,14 +141,29 @@ elif gran == "Weekly":
 else:  # Monthly
     rel["time"] = rel["updated"].dt.to_period("M").to_timestamp().dt.strftime("%b %y")
 
-# Create and display chart
-chart = create_chart(df_agg, rel)
-if chart is None:
+# Neon blue release markers
+rules = alt.Chart(rel).mark_rule(color="#00FFFF").encode(
+    x="time:O"
+)
+points = alt.Chart(rel).mark_point(color="#00FFFF", size=100).encode(
+    x="time:O",
+    tooltip=[
+        alt.Tooltip("issue_id",    title="Release ID"),
+        alt.Tooltip("summary",     title="Release Name"),
+        alt.Tooltip("status",      title="Status"),
+        alt.Tooltip("issue_type",  title="Type"),
+        alt.Tooltip("updated",     title="Date")
+    ]
+)
+
+chart = (line + text + rules + points).properties(
+    width=800, height=400
+).interactive()
+
+if df_agg.empty:
     st.warning("No metric data available for the selected period.")
 else:
-    chart_container = st.container()
-    with chart_container:
-        st.altair_chart(chart, use_container_width=True)
+    st.altair_chart(chart, use_container_width=True)
 
 # -----------------------------------------------------------------------------
 # 7. RAW DATA (Optional)
