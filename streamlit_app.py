@@ -31,9 +31,9 @@ metrics_df = metrics_df.assign(
     msat        = metrics_df["happy"] / metrics_df["feedback_given"]   * 100
 )
 
-# -----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
 # 4. USER CONTROLS
-# -----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
 st.sidebar.header("Controls")
 
 gran = st.sidebar.selectbox(
@@ -110,7 +110,6 @@ else:  # Monthly
 
 # sort chronologically by period_start
 df_agg = df_agg.sort_values("period_start")
-# domain order for x-axis
 sort_list = df_agg["time"].tolist()
 
 # add labels for each point
@@ -122,27 +121,24 @@ if not df_agg.empty:
 # -----------------------------------------------------------------------------
 st.title("Metrics vs. Releases")
 
-# Base line + points
 line = alt.Chart(df_agg).mark_line(point=True, color="steelblue").encode(
     x=alt.X("time:O", title="Time", sort=sort_list,
             axis=alt.Axis(labelAngle=0, labelAlign="center")),
     y=alt.Y("value:Q", title=metric_label)
 )
-# Data labels
 text = alt.Chart(df_agg).mark_text(dy=15, color="white").encode(
     x=alt.X("time:O", sort=sort_list),
-    y=alt.Y("value:Q"),
+    y="value:Q",
     text=alt.Text("value_label:N")
 )
 
 # -----------------------------------------------------------------------------
-# Release aggregation per period
+# Release aggregation
 # -----------------------------------------------------------------------------
 rel_filtered = releases_df[
     (releases_df["updated"] >= pd.to_datetime(start_date)) &
     (releases_df["updated"] <= pd.to_datetime(end_date))
 ].copy()
-
 if gran == "Daily":
     rel_filtered["period_start"] = rel_filtered["updated"].dt.normalize()
     grouping = ["period_start"]
@@ -153,14 +149,10 @@ elif gran == "Weekly":
 else:
     rel_filtered["period_start"] = rel_filtered["updated"].dt.to_period("M").apply(lambda p: p.start_time)
     grouping = ["period_start"]
-
-# count releases and collect keys
 rel_agg = rel_filtered.groupby(grouping).agg(
     releases_count=("issue_key","count"),
     releases_keys=("issue_key", lambda x: ", ".join(x))
 ).reset_index()
-
-# format time labels
 if gran == "Daily":
     rel_agg["time"] = rel_agg["period_start"].dt.strftime("%a, %d %b")
 elif gran == "Weekly":
@@ -170,14 +162,8 @@ elif gran == "Weekly":
     )
 else:
     rel_agg["time"] = rel_agg["period_start"].dt.strftime("%b %y")
-
-# sort for chart order
 rel_agg = rel_agg.sort_values("period_start")
-
-# release markers
-rules = alt.Chart(rel_agg).mark_rule(color="#00FFFF").encode(
-    x=alt.X("time:O", sort=sort_list)
-)
+rules = alt.Chart(rel_agg).mark_rule(color="#00FFFF").encode(x=alt.X("time:O", sort=sort_list))
 points = alt.Chart(rel_agg).mark_point(color="#00FFFF", size=100).encode(
     x=alt.X("time:O", sort=sort_list),
     tooltip=[
@@ -185,11 +171,7 @@ points = alt.Chart(rel_agg).mark_point(color="#00FFFF", size=100).encode(
         alt.Tooltip("releases_keys:N",   title="Issue Keys")
     ]
 )
-
-# combine layers
-temp = line + rules + points
-chart = alt.layer(temp, text).properties(width=800, height=400).interactive()
-
+chart = alt.layer(line + rules + points, text).properties(width=800, height=400).interactive()
 if df_agg.empty:
     st.warning("No metric data available for the selected period.")
 else:
@@ -199,7 +181,6 @@ else:
 # 7. RAW DATA (Optional)
 # -----------------------------------------------------------------------------
 with st.expander("Show raw aggregated data"):
-    # Aggregate metrics for display in same periods as chart
     df_metrics = df.copy()
     if gran == "Daily":
         df_metrics["period_start"] = df_metrics["date_"].dt.normalize()
@@ -211,23 +192,34 @@ with st.expander("Show raw aggregated data"):
     else:
         df_metrics["period_start"] = df_metrics["date_"].dt.to_period("M").apply(lambda p: p.start_time)
         group_cols = ["period_start"]
-    
     agg = df_metrics.groupby(group_cols).agg(
         active_sessions=("active_sessions","sum"),
+        fd_tickets=("fd_tickets","sum"),
         feedback_given=("feedback_given","sum"),
         msat=("msat","mean"),
         ticket_rate=("ticket_rate","mean")
     ).reset_index()
-    # merge with df_agg to get formatted time labels
     agg = agg.merge(df_agg[["period_start","time"]], on="period_start", how="left")
-    display_df = agg[["time","active_sessions","feedback_given","msat","ticket_rate"]]
-    # format percentages
-    display_df["msat"] = display_df["msat"].round(2).astype(str) + "%"
-    display_df["ticket_rate"] = display_df["ticket_rate"].round(2).astype(str) + "%"
-    # rename columns
+    display_df = agg[["time","active_sessions","fd_tickets","feedback_given","msat","ticket_rate"]]
+    # custom number formatting for large values
+    def fmt(v):
+        if v >= 1_000_000:
+            return f"{v/1_000_000:.1f}M"
+        elif v >= 1_000:
+            return f"{v/1_000:.1f}K"
+        else:
+            return str(int(v))
+    display_df["active_sessions"] = display_df["active_sessions"].apply(fmt)
+    display_df["fd_tickets"]     = display_df["fd_tickets"].apply(fmt)
+    display_df["feedback_given"]  = display_df["feedback_given"].apply(fmt)
+    # percentages
+    display_df["msat"]          = display_df["msat"].round(2).astype(str) + "%"
+    display_df["ticket_rate"]   = display_df["ticket_rate"].round(2).astype(str) + "%"
+    # rename columns to exact order
     display_df = display_df.rename(columns={
         "time":"Time Period",
         "active_sessions":"Active sessions",
+        "fd_tickets":"FD Tickets",
         "feedback_given":"Feedback given",
         "msat":"MSAT %",
         "ticket_rate":"Ticket creation %"
