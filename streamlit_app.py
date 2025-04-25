@@ -68,6 +68,14 @@ metric_label  = st.sidebar.selectbox(
 )
 metric_column = metric_options[metric_label]
 
+# Mapping for raw data column header
+data_label_map = {
+    "Ticket Creation Rate %": "Ticket creation %",
+    "MSAT":                    "MSAT %"
+}
+# Final raw-data header to use
+data_label = data_label_map[metric_label]
+
 # -----------------------------------------------------------------------------
 # 5. AGGREGATION & FORMATTING
 # -----------------------------------------------------------------------------
@@ -84,7 +92,6 @@ if gran == "Daily":
     df_agg["time"] = df_agg["time"].dt.strftime("%a, %d %b")
 
 elif gran == "Weekly":
-    # Week from Sunday to Saturday
     df["week_start"] = df["date_"].dt.to_period("W-SAT").apply(lambda p: p.start_time)
     df["week_end"]   = df["date_"].dt.to_period("W-SAT").apply(lambda p: p.end_time)
     df_agg = df.groupby(["week_start","week_end"], as_index=False).agg(
@@ -109,6 +116,7 @@ if not df_agg.empty:
 # -----------------------------------------------------------------------------
 # 6. CHARTING
 # -----------------------------------------------------------------------------
+
 st.title("Metrics vs. Releases")
 
 # Line + data labels
@@ -122,7 +130,7 @@ text = alt.Chart(df_agg).mark_text(dy=-10).encode(
     text=alt.Text("value_label:N")
 )
 
-# Prepare release annotations without mutating original
+# Prepare release annotations
 rel = releases_df.copy()
 rel = rel[
     (rel["updated"] >= pd.to_datetime(start_date)) &
@@ -141,7 +149,6 @@ elif gran == "Weekly":
 else:  # Monthly
     rel["time"] = rel["updated"].dt.to_period("M").to_timestamp().dt.strftime("%b %y")
 
-# Neon blue release markers
 rules = alt.Chart(rel).mark_rule(color="#00FFFF").encode(
     x="time:O"
 )
@@ -169,7 +176,11 @@ else:
 # 7. RAW DATA (Optional)
 # -----------------------------------------------------------------------------
 with st.expander("Show raw aggregated data"):
-    st.dataframe(df_agg)
+    # Drop raw 'value' and rename columns
+    display_df = df_agg.copy()
+    display_df = display_df.drop(columns=["value"])
+    display_df = display_df.rename(columns={"time":"Time Period", "value_label":data_label})
+    st.dataframe(display_df)
 
 with st.expander("Show release data"):
     st.dataframe(rel)
