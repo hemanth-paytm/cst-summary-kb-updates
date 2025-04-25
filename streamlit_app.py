@@ -18,7 +18,7 @@ st.set_page_config(
 def load_data():
     # Assumes data/metrics_data.csv and data/release_data.csv exist
     metrics = pd.read_csv("data/metrics_data.csv", parse_dates=["date_"])
-    releases = pd.read_csv("data/release_data_new.csv", parse_dates=["updated", "created"])
+    releases = pd.read_csv("data/release_data.csv", parse_dates=["updated", "created"])
     return metrics, releases
 
 metrics_df, releases_df = load_data()
@@ -120,11 +120,11 @@ if not df_agg.empty:
 # 6. CHARTING
 # -----------------------------------------------------------------------------
 st.title("Metrics vs. Releases")
-line = alt.Chart(df_agg).mark_line(point=True, color="steelblue").encode(
+line = alt.Chart(df_agg).mark_line(point=True, color="#000000").encode(
     x=alt.X("time:O", sort=axis_order, axis=alt.Axis(labelAngle=0, labelAlign="center")),
     y=alt.Y("value:Q", title=metric_label)
 )
-text = alt.Chart(df_agg).mark_text(dy=15, color="white").encode(
+text = alt.Chart(df_agg).mark_text(dy=15, color="#000000").encode(
     x=alt.X("time:O", sort=axis_order),
     y="value:Q",
     text=alt.Text("value_label:N")
@@ -161,8 +161,8 @@ elif gran == "Weekly":
 else:
     rel_count["time"] = rel_count["period_start"].dt.strftime("%b %y")
 rel_count = rel_count.sort_values("period_start")
-rules = alt.Chart(rel_count).mark_rule(color="#00FFFF").encode(x=alt.X("time:O", sort=axis_order))
-points = alt.Chart(rel_count).mark_point(color="#00FFFF", size=100).encode(
+rules = alt.Chart(rel_count).mark_rule(color="#ffd966").encode(x=alt.X("time:O", sort=axis_order))
+points = alt.Chart(rel_count).mark_point(color="#ffd966", size=100).encode(
     x=alt.X("time:O", sort=axis_order),
     tooltip=[alt.Tooltip("releases_count:Q", title="Release Count"), alt.Tooltip("releases_keys:N", title="Issue Keys")]
 )
@@ -177,7 +177,6 @@ else:
 # -----------------------------------------------------------------------------
 with st.expander("Show raw aggregated data"):
     df_metrics = df.copy()
-    # group and aggregate metrics
     if gran == "Daily":
         df_metrics["period_start"] = df_metrics["date_"].dt.normalize()
         group_cols = ["period_start"]
@@ -194,14 +193,10 @@ with st.expander("Show raw aggregated data"):
         feedback_given=("feedback_given","sum"),
         happy=("happy","sum")
     ).reset_index()
-    # recompute percentages
     agg["MSAT %"] = (agg["happy"] / agg["feedback_given"] * 100).round(2).astype(str) + "%"
     agg["Ticket creation %"] = (agg["fd_tickets"] / agg["active_sessions"] * 100).round(2).astype(str) + "%"
-    # merge labels
     agg = agg.merge(df_agg[["period_start","time"]], on="period_start", how="left")
-    # format large numbers
     def fmt(v): return f"{v/1_000_000:.1f}M" if v >= 1e6 else (f"{v/1_000:.1f}K" if v >= 1e3 else str(int(v)))
-    # build display table
     display_df = agg[["time","active_sessions","fd_tickets","feedback_given","MSAT %","Ticket creation %"]].copy()
     display_df["Active sessions"] = display_df["active_sessions"].apply(fmt)
     display_df["FD Tickets"]     = display_df["fd_tickets"].apply(fmt)
@@ -212,7 +207,6 @@ with st.expander("Show raw aggregated data"):
 
 with st.expander("Show release data"):
     rel_display = rel_filtered.copy()
-    # select only the requested columns and convert Release Date to date
     rel_display = rel_display.loc[:, ["period_start","issue_key","summary","jira_link","issue_type","created"]]
     rel_display["Release Date"] = rel_display["period_start"].dt.date
     rel_display = rel_display.rename(columns={
@@ -222,14 +216,11 @@ with st.expander("Show release data"):
         "issue_type":"Issue Type",
         "created":"Created On"
     })
-    # convert JIRA Link to HTML hyperlink
     rel_display["JIRA Link"] = rel_display["JIRA Link"].apply(
         lambda url: f"<a href='{url}' target='_blank'>{url}</a>"
     )
-    # reorder and drop helper
     rel_display = rel_display[["Release Date","JIRA ID","Summary","JIRA Link","Issue Type","Created On"]]
     rel_display = rel_display.sort_values("Release Date", ascending=False)
-    # render as HTML table to support links
     st.markdown(
         rel_display.to_html(index=False, escape=False),
         unsafe_allow_html=True
