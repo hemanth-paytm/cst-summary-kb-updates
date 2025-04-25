@@ -91,22 +91,21 @@ if gran == "Daily":
     df_agg["time"] = df_agg["period_start"].dt.strftime("%a, %d %b")
 
 elif gran == "Weekly":
-    df["week_start"] = df["date_"].dt.to_period("W-SAT").apply(lambda p: p.start_time)
-    df["week_end"]   = df["date_"].dt.to_period("W-SAT").apply(lambda p: p.end_time)
-    df_agg = df.groupby(["week_start","week_end"], as_index=False).agg(
+    df["period_start"] = df["date_"].dt.to_period("W-SAT").apply(lambda p: p.start_time)
+    df["period_end"]   = df["date_"].dt.to_period("W-SAT").apply(lambda p: p.end_time)
+    df_agg = df.groupby(["period_start","period_end"], as_index=False).agg(
         value=(metric_column, "mean")
     )
-    df_agg = df_agg.rename(columns={"week_start":"period_start"})
     df_agg["time"] = (
         df_agg["period_start"].dt.strftime("%b %d") + " - " +
-        df_agg["week_end"].dt.strftime("%b %d")
+        df_agg["period_end"].dt.strftime("%b %d")
     )
 
 else:  # Monthly
-    df["month_start"] = df["date_"].dt.to_period("M").apply(lambda p: p.start_time)
-    df_agg = df.groupby("month_start", as_index=False).agg(
+    df["period_start"] = df["date_"].dt.to_period("M").apply(lambda p: p.start_time)
+    df_agg = df.groupby("period_start", as_index=False).agg(
         value=(metric_column, "mean")
-    ).rename(columns={"month_start":"period_start"})
+    )
     df_agg["time"] = df_agg["period_start"].dt.strftime("%b %y")
 
 # sort chronologically by period_start
@@ -123,7 +122,7 @@ if not df_agg.empty:
 # -----------------------------------------------------------------------------
 st.title("Metrics vs. Releases")
 
-# Line
+# Base line + point markers
 line = alt.Chart(df_agg).mark_line(point=True, color="steelblue").encode(
     x=alt.X("time:O", title="Time", sort=sort_list,
             axis=alt.Axis(labelAngle=0, labelAlign="center")),
@@ -136,41 +135,60 @@ text = alt.Chart(df_agg).mark_text(dy=15, color="white").encode(
     text=alt.Text("value_label:N")
 )
 
-# Release annotations
-rel = releases_df.copy()
-rel = rel[
-    (rel["updated"] >= pd.to_datetime(start_date)) &
-    (rel["updated"] <= pd.to_datetime(end_date))
+# -----------------------------------------------------------------------------
+# Release aggregation per period
+# -----------------------------------------------------------------------------
+rel_filtered = releases_df[
+    (releases_df["updated"] >= pd.to_datetime(start_date)) &
+    (releases_df["updated"] <= pd.to_datetime(end_date))
 ].copy()
+
 if gran == "Daily":
-    rel["time"] = rel["updated"].dt.strftime("%a, %d %b")
+    rel_filtered["period_start"] = rel_filtered["updated"].dt.normalize()
+    grouping = ["period_start"]
 elif gran == "Weekly":
-    rel["period_start"] = rel["updated"].dt.to_period("W-SAT").apply(lambda p: p.start_time)
-    rel["week_end"]     = rel["updated"].dt.to_period("W-SAT").apply(lambda p: p.end_time)
-    rel["time"] = (
-        rel["period_start"].dt.strftime("%b %d") + " - " +
-        rel["week_end"].dt.strftime("%b %d")
+    rel_filtered["period_start"] = rel_filtered["updated"].dt.to_period("W-SAT").apply(lambda p: p.start_time)
+    rel_filtered["period_end"]   = rel_filtered["updated"].dt.to_period("W-SAT").apply(lambda p: p.end_time)
+    grouping = ["period_start","period_end"]
+else:
+    rel_filtered["period_start"] = rel_filtered["updated"].dt.to_period("M").apply(lambda p: p.start_time)
+    grouping = ["period_start"]
+
+# count releases and concatenate keys
+rel_agg = rel_filtered.groupby(grouping).agg(
+    releases_count=("issue_key","count"),
+    releases_keys=("issue_key", lambda x: ", ".join(x))
+).reset_index()
+
+# format time labels
+if gran == "Daily":
+    rel_agg["time"] = rel_agg["period_start"].dt.strftime("%a, %d %b")
+elif gran == "Weekly":
+    rel_agg["time"] = (
+        rel_agg["period_start"].dt.strftime("%b %d") + " - " +
+        rel_agg["period_end"].dt.strftime("%b %d")
     )
 else:
-    rel["time"] = rel["updated"].dt.to_period("M").to_timestamp().dt.strftime("%b %y")
+    rel_agg["time"] = rel_agg["period_start"].dt.strftime("%b %y")
 
-rules = alt.Chart(rel).mark_rule(color="#00FFFF").encode(
+# sort for chart order
+rel_agg = rel_agg.sort_values("period_start")
+
+# neon-blue release rule & points with aggregated tooltip
+rules = alt.Chart(rel_agg).mark_rule(color="#00FFFF").encode(
     x=alt.X("time:O", sort=sort_list)
 )
-points = alt.Chart(rel).mark_point(color="#00FFFF", size=100).encode(
+points = alt.Chart(rel_agg).mark_point(color="#00FFFF", size=100).encode(
     x=alt.X("time:O", sort=sort_list),
     tooltip=[
-        alt.Tooltip("issue_id",   title="Release ID"),
-        alt.Tooltip("summary",    title="Release Name"),
-        alt.Tooltip("status",     title="Status"),
-        alt.Tooltip("issue_type", title="Type"),
-        alt.Tooltip("updated",    title="Date")
+        alt.Tooltip("releases_count:Q", title="Release Count"),
+        alt.Tooltip("releases_keys:N",   title="Issue Keys")
     ]
 )
 
-# Layer: line, release, points, then text on top
-temp_chart = line + rules + points
-chart = alt.layer(temp_chart, text).properties(width=800, height=400).interactive()
+# combine layers
+temp = line + rules + points
+chart = alt.layer(temp, text).properties(width=800, height=400).interactive()
 
 if df_agg.empty:
     st.warning("No metric data available for the selected period.")
@@ -182,9 +200,12 @@ else:
 # -----------------------------------------------------------------------------
 with st.expander("Show raw aggregated data"):
     display_df = df_agg.copy()
-    display_df = display_df.drop(columns=["value","period_start"] + (["week_end"] if gran=="Weekly" else []))
+    drop_cols = ["value","period_start"] + (["period_end"] if gran=="Weekly" else [])
+    display_df = display_df.drop(columns=drop_cols)
     display_df = display_df.rename(columns={"time":"Time Period","value_label":data_label})
     st.dataframe(display_df)
 
 with st.expander("Show release data"):
-    st.dataframe(rel)
+    # all releases in filtered period, descending by updated
+    rel_details = rel_filtered.sort_values("updated", ascending=False)
+    st.dataframe(rel_details)
