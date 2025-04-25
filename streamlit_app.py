@@ -73,7 +73,6 @@ data_label_map = {
     "Ticket Creation Rate %": "Ticket creation %",
     "MSAT":                    "MSAT %"
 }
-# Final raw-data header to use
 data_label = data_label_map[metric_label]
 
 # -----------------------------------------------------------------------------
@@ -109,9 +108,9 @@ else:  # Monthly
     )
     df_agg["time"] = df_agg["month_start"].dt.strftime("%b %y")
 
-# Add labels for each point
+# Add labels for each point (rounded to 2 decimals)
 if not df_agg.empty:
-    df_agg["value_label"] = df_agg["value"].round(1).astype(str) + "%"
+    df_agg["value_label"] = df_agg["value"].round(2).map(lambda v: f"{v:.2f}%")
 
 # -----------------------------------------------------------------------------
 # 6. CHARTING
@@ -119,14 +118,15 @@ if not df_agg.empty:
 
 st.title("Metrics vs. Releases")
 
-# Line + data labels
+# Line
 line = alt.Chart(df_agg).mark_line(point=True, color="steelblue").encode(
     x=alt.X("time:O", title="Time", axis=alt.Axis(labelAngle=0, labelAlign="center")),
     y=alt.Y("value:Q", title=metric_label)
 )
-text = alt.Chart(df_agg).mark_text(dy=-10).encode(
+# Data labels below each point
+text = alt.Chart(df_agg).mark_text(dy=10, color="white").encode(
     x="time:O",
-    y="value:Q",
+    y=alt.Y("value:Q"),
     text=alt.Text("value_label:N")
 )
 
@@ -149,6 +149,7 @@ elif gran == "Weekly":
 else:  # Monthly
     rel["time"] = rel["updated"].dt.to_period("M").to_timestamp().dt.strftime("%b %y")
 
+# Neon blue release markers
 rules = alt.Chart(rel).mark_rule(color="#00FFFF").encode(
     x="time:O"
 )
@@ -163,6 +164,7 @@ points = alt.Chart(rel).mark_point(color="#00FFFF", size=100).encode(
     ]
 )
 
+# Combine all layers
 chart = (line + text + rules + points).properties(
     width=800, height=400
 ).interactive()
@@ -176,7 +178,6 @@ else:
 # 7. RAW DATA (Optional)
 # -----------------------------------------------------------------------------
 with st.expander("Show raw aggregated data"):
-    # Drop raw 'value' and rename columns
     display_df = df_agg.copy()
     display_df = display_df.drop(columns=["value"])
     display_df = display_df.rename(columns={"time":"Time Period", "value_label":data_label})
