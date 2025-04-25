@@ -1,0 +1,6 @@
+Issue key,Issue id,Summary,Status,Issue Type,created,updated,resolved,jira_link
+CINFRA-11127,4575904,SIP Service Enhancements,Closed,Task,2025-04-18 11:13:00,2025-04-21 00:00:00,2025-04-24 12:42:00,https://jira.mypaytm.com/browse/CINFRA-11127
+CINFRA-11119,4573109,BE Task || Image attachment support in chatbot,InProgress,Task,2025-04-17 11:08:00,2025-04-23 00:00:00,2025-04-22 12:34:00,https://jira.mypaytm.com/browse/CINFRA-11119
+CINFRA-11075,4564229,[Backend] CTA with Deeplink,Closed,Task,2025-04-11 16:24:00,2025-04-23 00:00:00,2025-04-24 10:18:00,https://jira.mypaytm.com/browse/CINFRA-11075
+CINFRA-11064,4562946,Audio (TTS) reading device serial number in numeric format like for device id 864218063170214 - STT conversion is eight hundred sity two million so n so,Closed,Story,2025-04-11 10:11:00,2025-04-23 00:00:00,2025-04-25 12:24:00,https://jira.mypaytm.com/browse/CINFRA-11064
+CINFRA-10750,4361132,UPI Contextual Fixes for transcript,Closed,Task,2025-01-02 12:26:00,2025-01-02 00:00:00,2025-04-10 15:07:00,https://jira.mypaytm.com/browse/CINFRA-10750
