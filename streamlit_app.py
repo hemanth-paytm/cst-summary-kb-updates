@@ -81,14 +81,16 @@ data_label = data_label_map[metric_label]
 
 df = metrics_df[
     (metrics_df["date_"] >= pd.to_datetime(start_date)) &
-    (metrics_df["date_"] <= pd.to_datetime(end_date))
+    (metrics_df["date_"].dt.date <= end_date)
 ].copy()
 
 if gran == "Daily":
-    df_agg = df.groupby("date_", as_index=False).agg(
+    df["period_start"] = df["date_"]
+    df_agg = df.groupby("period_start", as_index=False).agg(
         value=(metric_column, "mean")
-    ).rename(columns={"date_":"period_start"})
+    )
     df_agg["time"] = df_agg["period_start"].dt.strftime("%a, %d %b")
+    grouping = ["period_start"]
 
 elif gran == "Weekly":
     df["period_start"] = df["date_"].dt.to_period("W-SAT").apply(lambda p: p.start_time)
@@ -100,6 +102,7 @@ elif gran == "Weekly":
         df_agg["period_start"].dt.strftime("%b %d") + " - " +
         df_agg["period_end"].dt.strftime("%b %d")
     )
+    grouping = ["period_start","period_end"]
 
 else:  # Monthly
     df["period_start"] = df["date_"].dt.to_period("M").apply(lambda p: p.start_time)
@@ -107,6 +110,7 @@ else:  # Monthly
         value=(metric_column, "mean")
     )
     df_agg["time"] = df_agg["period_start"].dt.strftime("%b %y")
+    grouping = ["period_start"]
 
 # sort chronologically by period_start
 df_agg = df_agg.sort_values("period_start")
@@ -140,72 +144,39 @@ text = alt.Chart(df_agg).mark_text(dy=15, color="white").encode(
 # -----------------------------------------------------------------------------
 rel_filtered = releases_df[
     (releases_df["updated"] >= pd.to_datetime(start_date)) &
-    (releases_df["updated"] <= pd.to_datetime(end_date))
+    (releases_df["updated"].dt.date <= end_date)
 ].copy()
+for col in grouping:
+    if col not in rel_filtered:
+        if col == "period_end":
+            rel_filtered[col] = rel_filtered["updated"].dt.to_period("W-SAT").apply(lambda p: p.end_time)
+        else:
+            rel_filtered[col] = rel_filtered["updated"].apply(lambda d: d if col == "period_start" else pd.NaT)
 
-if gran == "Daily":
-    rel_filtered["period_start"] = rel_filtered["updated"].dt.normalize()
-    grouping = ["period_start"]
-elif gran == "Weekly":
-    rel_filtered["period_start"] = rel_filtered["updated"].dt.to_period("W-SAT").apply(lambda p: p.start_time)
-    rel_filtered["period_end"]   = rel_filtered["updated"].dt.to_period("W-SAT").apply(lambda p: p.end_time)
-    grouping = ["period_start","period_end"]
-else:
-    rel_filtered["period_start"] = rel_filtered["updated"].dt.to_period("M").apply(lambda p: p.start_time)
-    grouping = ["period_start"]
-
-# count releases and concatenate keys
 rel_agg = rel_filtered.groupby(grouping).agg(
-    releases_count=("issue_key","count"),
-    releases_keys=("issue_key", lambda x: ", ".join(x))
+    active_sessions_total=("issue_key", lambda x: len(x)),  # placeholder
 ).reset_index()
-
-# format time labels
-if gran == "Daily":
-    rel_agg["time"] = rel_agg["period_start"].dt.strftime("%a, %d %b")
-elif gran == "Weekly":
-    rel_agg["time"] = (
-        rel_agg["period_start"].dt.strftime("%b %d") + " - " +
-        rel_agg["period_end"].dt.strftime("%b %d")
-    )
-else:
-    rel_agg["time"] = rel_agg["period_start"].dt.strftime("%b %y")
-
-# sort for chart order
-rel_agg = rel_agg.sort_values("period_start")
-
-# neon-blue release rule & points with aggregated tooltip
-rules = alt.Chart(rel_agg).mark_rule(color="#00FFFF").encode(
-    x=alt.X("time:O", sort=sort_list)
-)
-points = alt.Chart(rel_agg).mark_point(color="#00FFFF", size=100).encode(
-    x=alt.X("time:O", sort=sort_list),
-    tooltip=[
-        alt.Tooltip("releases_count:Q", title="Release Count"),
-        alt.Tooltip("releases_keys:N",   title="Issue Keys")
-    ]
-)
-
-# combine layers
-temp = line + rules + points
-chart = alt.layer(temp, text).properties(width=800, height=400).interactive()
-
-if df_agg.empty:
-    st.warning("No metric data available for the selected period.")
-else:
-    st.altair_chart(chart, use_container_width=True)
 
 # -----------------------------------------------------------------------------
 # 7. RAW DATA (Optional)
 # -----------------------------------------------------------------------------
 with st.expander("Show raw aggregated data"):
-    display_df = df_agg.copy()
-    drop_cols = ["value","period_start"] + (["period_end"] if gran=="Weekly" else [])
-    display_df = display_df.drop(columns=drop_cols)
-    display_df = display_df.rename(columns={"time":"Time Period","value_label":data_label})
+    display_df = df.groupby(grouping).agg(
+        Active_Sessions=("active_sessions","sum"),
+        Feedback_Given=("feedback_given","sum"),
+        FD_Tickets=("fd_tickets","sum"),
+        Happy=("happy","sum")
+    ).reset_index()
+    # compute percentages
+    display_df["Ticket creation %"] = (display_df["FD_Tickets"]/display_df["Active_Sessions"]*100).round(2)
+    display_df["MSAT %"]             = (display_df["Happy"]/display_df["Feedback_Given"]*100).round(2)
+    # add human-readable time label
+    display_df = display_df.merge(df_agg[[*grouping, "time"]], on=grouping)
+    display_df = display_df.rename(columns={"time":"Time Period"})
+    # drop grouping columns
+    display_df = display_df.drop(columns=grouping)
     st.dataframe(display_df)
 
 with st.expander("Show release data"):
-    # all releases in filtered period, descending by updated
     rel_details = rel_filtered.sort_values("updated", ascending=False)
     st.dataframe(rel_details)
