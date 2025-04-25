@@ -1,151 +1,144 @@
+# app.py
 import streamlit as st
 import pandas as pd
-import math
-from pathlib import Path
+import altair as alt
 
-# Set the title and favicon that appear in the Browser's tab bar.
+# -----------------------------------------------------------------------------
+# 1. PAGE CONFIG
+# -----------------------------------------------------------------------------
 st.set_page_config(
-    page_title='GDP dashboard',
-    page_icon=':earth_americas:', # This is an emoji shortcode. Could be a URL too.
+    page_title="Metrics & Releases Dashboard",
+    layout="wide",
+    initial_sidebar_state="expanded",
 )
 
 # -----------------------------------------------------------------------------
-# Declare some useful functions.
-
+# 2. DATA LOADING
+# -----------------------------------------------------------------------------
 @st.cache_data
-def get_gdp_data():
-    """Grab GDP data from a CSV file.
+def load_data():
+    # Paths assume your repo has data/metrics_data.csv and data/release_data.csv
+    metrics = pd.read_csv("data/metrics_data.csv", parse_dates=["date_"])
+    releases = pd.read_csv("data/release_data.csv", parse_dates=["updated"])
+    return metrics, releases
 
-    This uses caching to avoid having to read the file every time. If we were
-    reading from an HTTP endpoint instead of a file, it's a good idea to set
-    a maximum age to the cache with the TTL argument: @st.cache_data(ttl='1d')
-    """
-
-    # Instead of a CSV on disk, you could read from an HTTP endpoint here too.
-    DATA_FILENAME = Path(__file__).parent/'data/gdp_data.csv'
-    raw_gdp_df = pd.read_csv(DATA_FILENAME)
-
-    MIN_YEAR = 1960
-    MAX_YEAR = 2022
-
-    # The data above has columns like:
-    # - Country Name
-    # - Country Code
-    # - [Stuff I don't care about]
-    # - GDP for 1960
-    # - GDP for 1961
-    # - GDP for 1962
-    # - ...
-    # - GDP for 2022
-    #
-    # ...but I want this instead:
-    # - Country Name
-    # - Country Code
-    # - Year
-    # - GDP
-    #
-    # So let's pivot all those year-columns into two: Year and GDP
-    gdp_df = raw_gdp_df.melt(
-        ['Country Code'],
-        [str(x) for x in range(MIN_YEAR, MAX_YEAR + 1)],
-        'Year',
-        'GDP',
-    )
-
-    # Convert years from string to integers
-    gdp_df['Year'] = pd.to_numeric(gdp_df['Year'])
-
-    return gdp_df
-
-gdp_df = get_gdp_data()
+metrics_df, releases_df = load_data()
 
 # -----------------------------------------------------------------------------
-# Draw the actual page
-
-# Set the title that appears at the top of the page.
-'''
-# :earth_americas: GDP dashboard
-
-Browse GDP data from the [World Bank Open Data](https://data.worldbank.org/) website. As you'll
-notice, the data only goes to 2022 right now, and datapoints for certain years are often missing.
-But it's otherwise a great (and did I mention _free_?) source of data.
-'''
-
-# Add some spacing
-''
-''
-
-min_value = gdp_df['Year'].min()
-max_value = gdp_df['Year'].max()
-
-from_year, to_year = st.slider(
-    'Which years are you interested in?',
-    min_value=min_value,
-    max_value=max_value,
-    value=[min_value, max_value])
-
-countries = gdp_df['Country Code'].unique()
-
-if not len(countries):
-    st.warning("Select at least one country")
-
-selected_countries = st.multiselect(
-    'Which countries would you like to view?',
-    countries,
-    ['DEU', 'FRA', 'GBR', 'BRA', 'MEX', 'JPN'])
-
-''
-''
-''
-
-# Filter the data
-filtered_gdp_df = gdp_df[
-    (gdp_df['Country Code'].isin(selected_countries))
-    & (gdp_df['Year'] <= to_year)
-    & (from_year <= gdp_df['Year'])
-]
-
-st.header('GDP over time', divider='gray')
-
-''
-
-st.line_chart(
-    filtered_gdp_df,
-    x='Year',
-    y='GDP',
-    color='Country Code',
+# 3. DERIVED METRICS
+# -----------------------------------------------------------------------------
+metrics_df = metrics_df.assign(
+    ticket_rate = metrics_df["fd_tickets"] / metrics_df["active_sessions"],
+    msat        = metrics_df["happy"] / metrics_df["feedback_given"]
 )
 
-''
-''
+# -----------------------------------------------------------------------------
+# 4. USER CONTROLS
+# -----------------------------------------------------------------------------
+st.sidebar.header("Controls")
 
+# Time granularity
+gran = st.sidebar.selectbox(
+    "Time Granularity",
+    ["Daily", "Weekly", "Monthly", "Yearly"]
+)
 
-first_year = gdp_df[gdp_df['Year'] == from_year]
-last_year = gdp_df[gdp_df['Year'] == to_year]
+# Date range filter
+min_date = metrics_df["date_"].min()
+max_date = metrics_df["date_"].max()
+start_date, end_date = st.sidebar.date_input(
+    "Date Range",
+    [min_date, max_date],
+    min_value=min_date,
+    max_value=max_date
+)
 
-st.header(f'GDP in {to_year}', divider='gray')
+# Metric selector
+metric_name = st.sidebar.selectbox(
+    "Metric to plot",
+    ["ticket_rate", "msat"]
+)
 
-''
+# -----------------------------------------------------------------------------
+# 5. AGGREGATION
+# -----------------------------------------------------------------------------
+df = metrics_df[
+    (metrics_df["date_"] >= pd.to_datetime(start_date)) &
+    (metrics_df["date_"] <= pd.to_datetime(end_date))
+].copy()
 
-cols = st.columns(4)
+if gran == "Daily":
+    df_agg = df.groupby("date_", as_index=False).agg(
+        value=(metric_name, "mean")
+    ).rename(columns={"date_":"time"})
+elif gran == "Weekly":
+    df["year_week"] = df["date_"].dt.to_period("W").astype(str)
+    df_agg = df.groupby("year_week", as_index=False).agg(
+        value=(metric_name, "mean")
+    ).rename(columns={"year_week":"time"})
+elif gran == "Monthly":
+    df["year_month"] = df["date_"].dt.to_period("M").astype(str)
+    df_agg = df.groupby("year_month", as_index=False).agg(
+        value=(metric_name, "mean")
+    ).rename(columns={"year_month":"time"})
+else:  # Yearly
+    df["year"] = df["date_"].dt.year
+    df_agg = df.groupby("year", as_index=False).agg(
+        value=(metric_name, "mean")
+    ).rename(columns={"year":"time"})
 
-for i, country in enumerate(selected_countries):
-    col = cols[i % len(cols)]
+# -----------------------------------------------------------------------------
+# 6. CHARTING
+# -----------------------------------------------------------------------------
+st.title("Metrics vs. Releases")
 
-    with col:
-        first_gdp = first_year[first_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-        last_gdp = last_year[last_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
+# Base line chart
+line = alt.Chart(df_agg).mark_line(point=True).encode(
+    x=alt.X("time:T" if gran=="Daily" else "time:O", title="Time"),
+    y=alt.Y("value:Q", title=metric_name.replace("_"," ").title())
+)
 
-        if math.isnan(first_gdp):
-            growth = 'n/a'
-            delta_color = 'off'
-        else:
-            growth = f'{last_gdp / first_gdp:,.2f}x'
-            delta_color = 'normal'
+# Prepare releases for annotation
+# Filter releases within the selected date range
+rel = releases_df[
+    (releases_df["updated"] >= pd.to_datetime(start_date)) &
+    (releases_df["updated"] <= pd.to_datetime(end_date))
+].copy()
 
-        st.metric(
-            label=f'{country} GDP',
-            value=f'{last_gdp:,.0f}B',
-            delta=growth,
-            delta_color=delta_color
-        )
+# For weekly/monthly/yearly we need to map release dates into the same 'time' domain
+if gran == "Daily":
+    rel["time"] = rel["updated"]
+else:
+    period = {"Weekly":"W","Monthly":"M","Yearly":"Y"}[gran]
+    rel["time"] = rel["updated"].dt.to_period(period).astype(str)
+
+# Release markers
+rules = alt.Chart(rel).mark_rule(color="red").encode(
+    x="time:T" if gran=="Daily" else "time:O"
+)
+points = alt.Chart(rel).mark_point(color="red", size=100).encode(
+    x="time:T" if gran=="Daily" else "time:O",
+    tooltip=[
+        alt.Tooltip("issue_id", title="Release ID"),
+        alt.Tooltip("summary", title="Release Name"),
+        alt.Tooltip("status", title="Status"),
+        alt.Tooltip("issue_type", title="Type"),
+        alt.Tooltip("updated", title="Date")
+    ]
+)
+
+# Combine
+chart = (line + rules + points).properties(
+    width=800, height=400
+).interactive()
+
+st.altair_chart(chart, use_container_width=True)
+
+# -----------------------------------------------------------------------------
+# 7. RAW DATA (Optional)
+# -----------------------------------------------------------------------------
+with st.expander("Show raw aggregated data"):
+    st.dataframe(df_agg)
+
+with st.expander("Show release data"):
+    st.dataframe(rel)

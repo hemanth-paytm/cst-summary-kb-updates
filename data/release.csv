@@ -1,0 +1,10 @@
+issue_key,issue_id,summary,status,issue_type,created,updated,resolved
+CINFRA-11124,4574150,Investment KB update V3 17th April,Closed,Improvement,2025-04-17 15:46:00,2025-04-18 12:53:00,
+CINFRA-11121,4573366,Train Prompt Changes,UAT,Improvement,2025-04-17 12:15:00,2025-04-22 15:16:00,
+CINFRA-11111,4571693,UPI Knowledge base update V10,Closed,Improvement,2025-04-16 16:19:00,2025-04-17 15:33:00,
+CINFRA-11013,4555148,"Refund fix in ""PAYTM_TRAVEL_CONTEXTUAL_PROMPT""",InProgress,Task,2025-04-08 11:58:00,2025-04-08 15:24:00,
+CINFRA-10965,4530233,UPI Knowledge base update V8,Closed,Improvement,2025-03-26 14:06:00,2025-04-03 11:30:00,
+CINFRA-10953,4527195,PAYTM_PL_CONTEXTUAL_PROMPT Extra Space removal,InProgress,Task,2025-03-25 11:50:00,2025-03-25 17:18:00,
+CINFRA-10933,4516690,UPI Knowledge base update V7,Closed,Improvement,2025-03-19 13:26:00,2025-03-21 11:15:00,2025-03-21 11:15:00
+CINFRA-10902,4502571,Transformation Updates - 11 March 2025,In Review,Task,2025-03-11 16:26:00,2025-04-08 10:47:00,
+CINFRA-10750,4361132,UPI Contextual Fixes for transcript,Closed,Task,2025-01-02 12:26:00,2025-04-10 15:07:00,
