@@ -85,19 +85,22 @@ df = metrics_df[
 ].copy()
 
 if gran == "Daily":
+    # group by actual date
     df_agg = df.groupby("date_", as_index=False).agg(
         value=(metric_column, "mean")
-    ).rename(columns={"date_":"time"})
-    df_agg["time"] = df_agg["time"].dt.strftime("%a, %d %b")
+    ).rename(columns={"date_":"period_start"})
+    df_agg["time"] = df_agg["period_start"].dt.strftime("%a, %d %b")
 
 elif gran == "Weekly":
+    # week from Sunday to Saturday
     df["week_start"] = df["date_"].dt.to_period("W-SAT").apply(lambda p: p.start_time)
     df["week_end"]   = df["date_"].dt.to_period("W-SAT").apply(lambda p: p.end_time)
     df_agg = df.groupby(["week_start","week_end"], as_index=False).agg(
         value=(metric_column, "mean")
     )
+    df_agg = df_agg.rename(columns={"week_start":"period_start"})
     df_agg["time"] = (
-        df_agg["week_start"].dt.strftime("%b %d") + " - " +
+        df_agg["period_start"].dt.strftime("%b %d") + " - " +
         df_agg["week_end"].dt.strftime("%b %d")
     )
 
@@ -105,66 +108,67 @@ else:  # Monthly
     df["month_start"] = df["date_"].dt.to_period("M").apply(lambda p: p.start_time)
     df_agg = df.groupby("month_start", as_index=False).agg(
         value=(metric_column, "mean")
-    )
-    df_agg["time"] = df_agg["month_start"].dt.strftime("%b %y")
+    ).rename(columns={"month_start":"period_start"})
+    df_agg["time"] = df_agg["period_start"].dt.strftime("%b %y")
 
-# Add labels for each point (rounded to 2 decimals)
+# sort chronologically by period_start
+df_agg = df_agg.sort_values("period_start")
+# domain order for x-axis
+sort_list = df_agg["time"].tolist()
+
+# add labels for each point
 if not df_agg.empty:
-    df_agg["value_label"] = df_agg["value"].round(2).map(lambda v: f"{v:.2f}%")
+    df_agg["value_label"] = df_agg["value"].round(2).astype(str) + "%"
 
 # -----------------------------------------------------------------------------
 # 6. CHARTING
 # -----------------------------------------------------------------------------
-
 st.title("Metrics vs. Releases")
 
-# Line
+# line + data labels
 line = alt.Chart(df_agg).mark_line(point=True, color="steelblue").encode(
-    x=alt.X("time:O", title="Time", axis=alt.Axis(labelAngle=0, labelAlign="center")),
+    x=alt.X("time:O", title="Time", sort=sort_list,
+            axis=alt.Axis(labelAngle=0, labelAlign="center")),
     y=alt.Y("value:Q", title=metric_label)
 )
-# Data labels below each point
-text = alt.Chart(df_agg).mark_text(dy=10, color="white").encode(
-    x="time:O",
-    y=alt.Y("value:Q"),
+text = alt.Chart(df_agg).mark_text(dy=-10).encode(
+    x=alt.X("time:O", sort=sort_list),
+    y="value:Q",
     text=alt.Text("value_label:N")
 )
 
-# Prepare release annotations
+# release annotations
 rel = releases_df.copy()
 rel = rel[
     (rel["updated"] >= pd.to_datetime(start_date)) &
     (rel["updated"] <= pd.to_datetime(end_date))
 ].copy()
-
 if gran == "Daily":
     rel["time"] = rel["updated"].dt.strftime("%a, %d %b")
 elif gran == "Weekly":
-    rel["week_start"] = rel["updated"].dt.to_period("W-SAT").apply(lambda p: p.start_time)
-    rel["week_end"]   = rel["updated"].dt.to_period("W-SAT").apply(lambda p: p.end_time)
+    rel["period_start"] = rel["updated"].dt.to_period("W-SAT").apply(lambda p: p.start_time)
+    rel["week_end"]     = rel["updated"].dt.to_period("W-SAT").apply(lambda p: p.end_time)
     rel["time"] = (
-        rel["week_start"].dt.strftime("%b %d") + " - " +
+        rel["period_start"].dt.strftime("%b %d") + " - " +
         rel["week_end"].dt.strftime("%b %d")
     )
-else:  # Monthly
+else:
     rel["time"] = rel["updated"].dt.to_period("M").to_timestamp().dt.strftime("%b %y")
 
-# Neon blue release markers
 rules = alt.Chart(rel).mark_rule(color="#00FFFF").encode(
-    x="time:O"
+    x=alt.X("time:O", sort=sort_list)
 )
 points = alt.Chart(rel).mark_point(color="#00FFFF", size=100).encode(
-    x="time:O",
+    x=alt.X("time:O", sort=sort_list),
     tooltip=[
-        alt.Tooltip("issue_id",    title="Release ID"),
-        alt.Tooltip("summary",     title="Release Name"),
-        alt.Tooltip("status",      title="Status"),
-        alt.Tooltip("issue_type",  title="Type"),
-        alt.Tooltip("updated",     title="Date")
+        alt.Tooltip("issue_id",   title="Release ID"),
+        alt.Tooltip("summary",    title="Release Name"),
+        alt.Tooltip("status",     title="Status"),
+        alt.Tooltip("issue_type", title="Type"),
+        alt.Tooltip("updated",    title="Date")
     ]
 )
 
-# Combine all layers
 chart = (line + text + rules + points).properties(
     width=800, height=400
 ).interactive()
@@ -179,8 +183,8 @@ else:
 # -----------------------------------------------------------------------------
 with st.expander("Show raw aggregated data"):
     display_df = df_agg.copy()
-    display_df = display_df.drop(columns=["value"])
-    display_df = display_df.rename(columns={"time":"Time Period", "value_label":data_label})
+    display_df = display_df.drop(columns=["value","period_start"] + (["week_end"] if gran=="Weekly" else []))
+    display_df = display_df.rename(columns={"time":"Time Period","value_label":data_label})
     st.dataframe(display_df)
 
 with st.expander("Show release data"):
