@@ -1,4 +1,3 @@
-# app.py
 import streamlit as st
 import pandas as pd
 import altair as alt
@@ -25,11 +24,11 @@ def load_data():
 metrics_df, releases_df = load_data()
 
 # -----------------------------------------------------------------------------
-# 3. DERIVED METRICS
+# 3. DERIVED METRICS (as percentages)
 # -----------------------------------------------------------------------------
 metrics_df = metrics_df.assign(
-    ticket_rate = metrics_df["fd_tickets"] / metrics_df["active_sessions"],
-    msat        = metrics_df["happy"] / metrics_df["feedback_given"]
+    ticket_rate = metrics_df["fd_tickets"] / metrics_df["active_sessions"] * 100,
+    msat        = metrics_df["happy"] / metrics_df["feedback_given"]   * 100
 )
 
 # -----------------------------------------------------------------------------
@@ -37,27 +36,42 @@ metrics_df = metrics_df.assign(
 # -----------------------------------------------------------------------------
 st.sidebar.header("Controls")
 
-# Time granularity
+# Time granularity (no Yearly)
 gran = st.sidebar.selectbox(
     "Time Granularity",
-    ["Daily", "Weekly", "Monthly", "Yearly"]
+    ["Daily", "Weekly", "Monthly"]
 )
 
-# Date range filter
-min_date = metrics_df["date_"].min()
-max_date = metrics_df["date_"].max()
+# Absolute min/max dates
+min_date = metrics_df["date_"].min().date()
+max_date = metrics_df["date_"].max().date()
+
+# Default window: last 15 days / 5 weeks / 4 months
+if gran == "Daily":
+    default_start = max_date - pd.Timedelta(days=14)
+elif gran == "Weekly":
+    default_start = max_date - pd.Timedelta(weeks=5)
+else:  # Monthly
+    default_start = (max_date - pd.DateOffset(months=4)).date()
+
+# Date range picker
 start_date, end_date = st.sidebar.date_input(
     "Date Range",
-    [min_date, max_date],
+    [default_start, max_date],
     min_value=min_date,
     max_value=max_date
 )
 
-# Metric selector
-metric_name = st.sidebar.selectbox(
+# Metric selector (friendly names → column keys)
+metric_options = {
+    "Ticket Creation Rate %": "ticket_rate",
+    "MSAT":                    "msat"
+}
+metric_label  = st.sidebar.selectbox(
     "Metric to plot",
-    ["ticket_rate", "msat"]
+    list(metric_options.keys())
 )
+metric_column = metric_options[metric_label]
 
 # -----------------------------------------------------------------------------
 # 5. AGGREGATION
@@ -69,23 +83,18 @@ df = metrics_df[
 
 if gran == "Daily":
     df_agg = df.groupby("date_", as_index=False).agg(
-        value=(metric_name, "mean")
+        value=(metric_column, "mean")
     ).rename(columns={"date_":"time"})
 elif gran == "Weekly":
     df["year_week"] = df["date_"].dt.to_period("W").astype(str)
     df_agg = df.groupby("year_week", as_index=False).agg(
-        value=(metric_name, "mean")
+        value=(metric_column, "mean")
     ).rename(columns={"year_week":"time"})
-elif gran == "Monthly":
+else:  # Monthly
     df["year_month"] = df["date_"].dt.to_period("M").astype(str)
     df_agg = df.groupby("year_month", as_index=False).agg(
-        value=(metric_name, "mean")
+        value=(metric_column, "mean")
     ).rename(columns={"year_month":"time"})
-else:  # Yearly
-    df["year"] = df["date_"].dt.year
-    df_agg = df.groupby("year", as_index=False).agg(
-        value=(metric_name, "mean")
-    ).rename(columns={"year":"time"})
 
 # -----------------------------------------------------------------------------
 # 6. CHARTING
@@ -95,21 +104,19 @@ st.title("Metrics vs. Releases")
 # Base line chart
 line = alt.Chart(df_agg).mark_line(point=True).encode(
     x=alt.X("time:T" if gran=="Daily" else "time:O", title="Time"),
-    y=alt.Y("value:Q", title=metric_name.replace("_"," ").title())
+    y=alt.Y("value:Q", title=metric_label)
 )
 
 # Prepare releases for annotation
-# Filter releases within the selected date range
 rel = releases_df[
     (releases_df["updated"] >= pd.to_datetime(start_date)) &
     (releases_df["updated"] <= pd.to_datetime(end_date))
 ].copy()
 
-# For weekly/monthly/yearly we need to map release dates into the same 'time' domain
 if gran == "Daily":
     rel["time"] = rel["updated"]
 else:
-    period = {"Weekly":"W","Monthly":"M","Yearly":"Y"}[gran]
+    period = {"Weekly":"W","Monthly":"M"}[gran]
     rel["time"] = rel["updated"].dt.to_period(period).astype(str)
 
 # Release markers
